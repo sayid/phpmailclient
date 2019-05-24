@@ -1,0 +1,33 @@
+{
+    "name": "phpmailclient",
+    "description": "receive mail by pop3/imap,and decode mail structure",
+    "type": "library",
+    "version": "1.0.1",
+    "require": {
+        "php": ">=7"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "~6.0",
+    },
+    "autoload": {
+        "psr-4": {
+            "PhpMailClient\\": "src/"
+        },
+        "files": [
+            "src/helpers.php"
+        ]
+    },
+    "authors": [
+        {
+            "name": "zyb",
+            "email": "449063862@qq.com"
+        }
+    ],
+    "minimum-stability": "dev",
+  "repositories": {
+    "packagist": {
+      "type": "composer",
+      "url": "https://packagist.org"
+    }
+  }
+}
