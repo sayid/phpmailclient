@@ -1,11 +1,10 @@
 <?php
 
-namespace App\Libraries;
+namespace PhpMailClient;
 
-use GouuseCore\Helpers\OptionHelper;
 use GouuseCore\Helpers\DateHelper;
 
-class MailLib
+class MailClient
 {
 	var $pro = 'imap';
 	var $is_ssl = false;
@@ -90,7 +89,7 @@ class MailLib
 				return false;
 			}
 			//echo $this->strHost.', '.$this->intPort;
-            $time_start = DateHelper::microtime_float();
+            $time_start = microtime_float();
 			try {
                 $this->resHandler = fsockopen($this->strHost, $this->intPort, $this->intErrorNum, $this->strMessage, $this->intConnSecond);
             } catch (\Exception $e) {

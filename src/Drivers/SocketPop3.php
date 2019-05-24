@@ -30,10 +30,8 @@ class SocketPop3Lib
 	var $total_mail = 0;
 	var $command_status = false;
 
-    private $_excute_logs = [];
-
 	function __construct() {
-
+		$this->obj = OptionHelper::getGouuse();
 	}
 	//---------------
 	// 基础操作
@@ -41,12 +39,12 @@ class SocketPop3Lib
 	//构造函数
 	public function getInstance($strLoginEmail, $strLoginPasswd, $strPopHost='', $intPort='', $is_ssl=false)
 	{
-		
+
 		$this->resHandler = NULL;
 		$this->__command_line = 0;
 		$this->strEmail        = trim(strtolower($strLoginEmail));
 		$this->strPasswd    = trim($strLoginPasswd);
-		
+
 		$this->strHost        = trim(strtolower($strPopHost));
 		$this->is_ssl = $is_ssl;
 		if ($this->is_ssl) {
@@ -71,7 +69,7 @@ class SocketPop3Lib
 			$this->intPort = $intPort;
 		}
 		$this->connectHost();
-		
+
 		return $this;
 	}
 
@@ -141,8 +139,8 @@ class SocketPop3Lib
 
 		$this->strRequest = $strCommand."\r\n";
 		if (isset($this->debug) || $this->bolDebug) {
-            echo $this->strRequest;
-        }
+			echo $this->strRequest;
+		}
 		$this->arrRequest[] = $strCommand;
 		$status = fputs($this->resHandler, $this->strRequest, strlen($this->strRequest));
 		return true;
@@ -155,32 +153,32 @@ class SocketPop3Lib
 			return false;
 		}
 		$this->strResponse = fgets($this->resHandler, $this->intBuffSize);
-        if (isset($this->debug) || $this->bolDebug) {
-            echo mb_convert_encoding($this->strResponse, 'utf-8', 'gbk');
-        }
+		if (isset($this->debug) || $this->bolDebug) {
+			echo mb_convert_encoding($this->strResponse, 'utf-8', 'gbk');
+		}
 		$this->arrResponse[] = $this->strResponse;
 		return $this->strResponse;
 	}
-	
+
 	function getsMore($bufferSize = 0) {
 		if (!$this->getIsConnect())
 		{
 			return false;
 		}
 		if (!$bufferSize) {
-            $bufferSize = $this->intBuffSize;
+			$bufferSize = $this->intBuffSize;
 		}
 
 		$this->strResponse = fread($this->resHandler, $bufferSize);
-        if (isset($this->debug) || $this->bolDebug) {
-            echo mb_convert_encoding($this->strResponse, 'utf-8', 'gbk');
-        }
+		if (isset($this->debug) || $this->bolDebug) {
+			echo mb_convert_encoding($this->strResponse, 'utf-8', 'gbk');
+		}
 		$this->arrResponse[] = $this->strResponse;
 		return $this->strResponse;
 	}
 	//提取若干响应信息,$intReturnType是返回值类型, 1为字符串, 2为数组
 	/**
-	 * 
+	 *
 	 * @param unknown $intReturnType
 	 * @param number $intMail
 	 * @param string $mail_log
@@ -192,7 +190,7 @@ class SocketPop3Lib
 	{
 		$this->command_status = false;
 		if (!$this->getIsConnect())
-		{	
+		{
 			return false;
 		}
 		unset($this->debug);
@@ -204,13 +202,13 @@ class SocketPop3Lib
 			while(!feof($this->resHandler))
 			{
 				$strLineResponse = $this->getsMore();
-                $strAllResponse .= $strLineResponse;
-                if (preg_match("/\r\n.\r\n$/Ui", $strAllResponse))
-                {
-                    $this->command_status = true;
-                    break;
-                }
-            }
+				$strAllResponse .= $strLineResponse;
+				if (preg_match("/\r\n.\r\n$/Ui", $strAllResponse))
+				{
+					$this->command_status = true;
+					break;
+				}
+			}
 			return substr($strAllResponse, 0,-5);
 		}
 		else
@@ -220,30 +218,30 @@ class SocketPop3Lib
 			while(!feof($this->resHandler))
 			{
 				$i++;
-                $strLineResponse = $this->getsMore();
+				$strLineResponse = $this->getsMore();
 
-                if (preg_match("/.\r\n$/Ui", $strLineResponse))
-                {
-                    $this->command_status = true;
-                    break;
-                }
+				if (preg_match("/.\r\n$/Ui", $strLineResponse))
+				{
+					$this->command_status = true;
+					break;
+				}
 
-				
+
 				if (isset($handle_w)) {
 					fwrite($handle_w, $strLineResponse);
-				} 
-                $arrAllResponse[] = $strLineResponse;
+				}
+				$arrAllResponse[] = $strLineResponse;
 			}
 			return $arrAllResponse;
 		}
 	}
 
 
-    /**
-     * @param int $intMail 邮件id
-     * @param $mail_log 存入临时文件，方便解析
-     * @return array|bool|string
-     */
+	/**
+	 * @param int $intMail 邮件id
+	 * @param $mail_log 存入临时文件，方便解析
+	 * @return array|bool|string
+	 */
 	public function download($folder, $intMail, $mail_log)
 	{
 		$this->command_status = false;
@@ -257,26 +255,26 @@ class SocketPop3Lib
 			$handle_w = fopen($mail_log, "w");
 		}
 		$this->sendCommand("RETR ". $intMail);
-        $strLineResponse = $this->getLineResponse();
+		$strLineResponse = $this->getLineResponse();
 		if (!$this->getRestIsSucceed($strLineResponse)) {
 			return false;
 		}
-        $last_tmp = '';//用于存储上一次缓冲内容
+		$last_tmp = '';//用于存储上一次缓冲内容
 		while(!feof($this->resHandler))
 		{
 			$strLineResponse = $this->getsMore();
-            $temp_line = $last_tmp.$strLineResponse;
-            $last_tmp = $strLineResponse;
-            $is_over = false;
-            if (preg_match("/\r\n.\r\n$/Ui", $temp_line))
-            {
-                $strLineResponse = substr($strLineResponse, 0,-5);
-                $is_over = true;
-            }
-            if ($mail_log) {
-                //每次写入100行
-                $s = fwrite($handle_w, $strLineResponse);
-            }
+			$temp_line = $last_tmp.$strLineResponse;
+			$last_tmp = $strLineResponse;
+			$is_over = false;
+			if (preg_match("/\r\n.\r\n$/Ui", $temp_line))
+			{
+				$strLineResponse = substr($strLineResponse, 0,-5);
+				$is_over = true;
+			}
+			if ($mail_log) {
+				//每次写入100行
+				$s = fwrite($handle_w, $strLineResponse);
+			}
 			if ($is_over)
 			{
 				//结束
@@ -304,11 +302,11 @@ class SocketPop3Lib
 			$this->setMessage('Response message is empty', 2003);
 			return false;
 		}
-		
+
 		if ($this->pro == 'smtp') {
 			if (preg_match("/220/", $strRespMessage))
 			{
-				
+
 			} else {
 				$this->setMessage($strRespMessage, 2000);
 				return false;
@@ -319,7 +317,7 @@ class SocketPop3Lib
 				$this->setMessage($strRespMessage, 2000);
 				return false;
 			}
-		} 
+		}
 		return true;
 	}
 	//获取是否已连接
@@ -421,7 +419,7 @@ class SocketPop3Lib
 		}
 		return true;
 	}
-	
+
 	//获取邮件数量和字节数(返回数组)
 	function getMailSum($intReturnType=2)
 	{
@@ -501,17 +499,17 @@ class SocketPop3Lib
 			if (empty($this->Select_Box)) {
 				$this->selectFolder();
 			}
-			
+
 			$this->sendCommand("FETCH ". $intMailId." RFC822.SIZE");
 			$line = $this->getLineResponse();
 			$line1 = $this->getLineResponse();
-				//echo $line."\n";
-				//echo $line1."\n";
+			//echo $line."\n";
+			//echo $line1."\n";
 			if (preg_match("/FETCH \(UID (\d+) RFC822.SIZE (\d+)\)/", $line, $match)) {
 				return $match[2];
 			}
 			return false;
-			
+
 		} else {
 			$this->sendCommand("LIST ".$intMailId);
 			$this->getLineResponse();
@@ -526,19 +524,19 @@ class SocketPop3Lib
 
 	function getFolderList()
 	{
-        $folder = 'Inbox';
-        $this->sendCommand("stat");
-        $strResponse = $this->getLineResponse();
-        if (!$this->getRestIsSucceed($strResponse))
-        {
-            return false;
-        }
-        $arr = explode(" ", $strResponse);
+		$folder = 'Inbox';
+		$this->sendCommand("stat");
+		$strResponse = $this->getLineResponse();
+		if (!$this->getRestIsSucceed($strResponse))
+		{
+			return false;
+		}
+		$arr = explode(" ", $strResponse);
 		return [
 			[
 				$folder => ['folder' => $folder, 'folder_type' => 'inbox',  'folder_name' => $this->obj->MailDecodeLib->folderToName($folder), 'total' => $arr[1]],
-                'trash' => ['folder' => 'trash', 'folder_type' => 'trash',  'folder_name' => '草稿箱', 'total' => 0]
-				]
+				'draft' => ['folder' => 'draft', 'folder_type' => 'draft',  'folder_name' => '草稿箱', 'total' => 0]
+			]
 		];
 	}
 
@@ -575,29 +573,29 @@ class SocketPop3Lib
 			rsort($data);
 			return $data;
 		}
-		
+
 	}
 
 
-    //获取邮件基本列表数组
-    function getUidList($folder, $check_cache = false)
-    {
-        if (!$this->getIsConnect() && $this->bolIsLogin)
-        {
-            return false;
-        }
+	//获取邮件基本列表数组
+	function getUidList($folder, $check_cache = false)
+	{
+		if (!$this->getIsConnect() && $this->bolIsLogin)
+		{
+			return false;
+		}
 
-        $redis_key = 'mail_uid'.$this->strEmail.$this->pro;
-        $results = [];
-        if ($check_cache && $data = $this->obj->CacheLib->get($redis_key)) {
-            return $data;
-        }
-        $this->sendCommand("UIDL");
-        $line = $this->getLineResponse();
-        $data = $this->getRespMessage(1);
-        $data = explode("\r\n", $data);
-        $results = [];
-        /*$total = count($data);
+		$redis_key = 'mail_uid'.$this->strEmail.$this->pro;
+		$results = [];
+		if ($check_cache && $data = $this->obj->CacheLib->get($redis_key)) {
+			return $data;
+		}
+		$this->sendCommand("UIDL");
+		$line = $this->getLineResponse();
+		$data = $this->getRespMessage(1);
+		$data = explode("\r\n", $data);
+		$results = [];
+		/*$total = count($data);
         if ($total) {
             $count = 0;
             $unReceiveMail = $this->obj->getUnAbleReceive($this->account_id, $folder);
@@ -612,34 +610,34 @@ class SocketPop3Lib
                 }
                 $count++;
                 if ($count >= 1000) {
-                	//最多同步1000封
+                    //最多同步1000封
                     break;
                 }
             }
         }*/
-        foreach ($data as $row) {
-            $index = substr($row, 0, strpos($row, " "));
-            $uid = substr($row, strpos($row, " ")+1);
-            if ($uid) {
-                $results[$uid] = ['uid' => $uid, 'index' => $index];
-            }
-        }
+		foreach ($data as $row) {
+			$index = substr($row, 0, strpos($row, " "));
+			$uid = substr($row, strpos($row, " ")+1);
+			if ($uid) {
+				$results[$uid] = ['uid' => $uid, 'index' => $index];
+			}
+		}
 		//设置过期时间
-        $this->obj->CacheLib->set($redis_key, $results, 300);
-        return $results;
-    }
+		$this->obj->CacheLib->set($redis_key, $results, 300);
+		return $results;
+	}
 
-    public function clearCache($folder = '')
-    {
-        $redis_key = 'mail_uid'.$this->strEmail.$this->pro;
-        $this->obj->CacheLib->delete($redis_key);
-    }
-
-    public function getUidIndex($uid)
+	public function clearCache($folder = '')
 	{
-        $redis_key = 'mail_uid'.$this->strEmail.$this->pro;
-        $data = $this->obj->CacheLib->get($redis_key);
-        return $data[$uid]['index'] ?? '';
+		$redis_key = 'mail_uid'.$this->strEmail.$this->pro;
+		$this->obj->CacheLib->delete($redis_key);
+	}
+
+	public function getUidIndex($uid)
+	{
+		$redis_key = 'mail_uid'.$this->strEmail.$this->pro;
+		$data = $this->obj->CacheLib->get($redis_key);
+		return $data[$uid]['index'] ?? '';
 	}
 
 	/**
@@ -655,14 +653,14 @@ class SocketPop3Lib
 			$this->sendCommand("FETCH ". $intMailId." INTERNALDATE");
 			$line = $this->getLineResponse();
 			$line1 = $this->getLineResponse();
-		//	echo $line."\n";
-		//	echo $line1."\n";
+			//	echo $line."\n";
+			//	echo $line1."\n";
 			if (preg_match("/FETCH \(UID (\d+) INTERNALDATE \"(.*)\"/", $line, $match)) {
 				if ($start = strpos($match[2], '(')) {
 					//过滤 Date: Tue, 28 Jun 2016 17:30:34 +0800 (GMT+08:00) 格式
 					$match[2] = substr($match[2], 0, $start);
-				} 
-				
+				}
+
 				if (isset($match[1])) {
 					$uid = $match[1];
 					return array(md5(str_replace(array("\n","\r", " "), "",$uid)), strtotime($match[2]));
@@ -702,7 +700,7 @@ class SocketPop3Lib
 				return false;
 			}
 			$data = $this->getDetail($intReturnType, $intMailId,$mail_log, $need_return, $mail_size);
-			
+
 			return $data;
 		} else {
 			$this->sendCommand("RETR ". $intMailId);
@@ -714,12 +712,12 @@ class SocketPop3Lib
 			return $this->getDetail($intReturnType, $intMailId, $mail_log, $need_return, $mail_size);
 		}
 	}
-	
-	
+
+
 	//获取某邮件前指定行, $intReturnType 返回值类型，1是字符串，2是数组
 	function getMailTopMessage($intMailId, $intReturnType=1)
 	{
-		
+
 		if (!$this->getIsConnect() && $this->bolIsLogin)
 		{
 			return false;
@@ -735,8 +733,8 @@ class SocketPop3Lib
 		return $data;
 
 	}
-	
-	
+
+
 	//删除邮件
 	function delMail($intMailId)
 	{
