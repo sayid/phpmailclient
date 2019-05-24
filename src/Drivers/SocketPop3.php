@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Libraries;
+namespace PhpMailClient\Drivers;
 
 use GouuseCore\Helpers\OptionHelper;
 use GouuseCore\Helpers\RpcHelper;

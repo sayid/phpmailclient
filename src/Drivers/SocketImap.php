@@ -1,9 +1,13 @@
 <?php
 
-namespace App\Libraries;
+namespace PhpMailClient\Drivers;
 
 use GouuseCore\Helpers\OptionHelper;
 use GouuseCore\Helpers\DateHelper;
+use function Hprose\Future\run;
+use PhpMailClient\Cache;
+use PhpMailClient\Log;
+use PhpMailClient\MailDecode;
 
 class SocketImapLib
 {
@@ -33,15 +37,25 @@ class SocketImapLib
     var $cache_time = 180;
     public $exception;
 
-    const FOLDER_TYPE_SENT_SALE = 'sent_sale';
-
     private $cachePrefix = '';
-
+    private $OPTIMIZATION_DEBUG = false;
     //需要使用代理的邮箱
     public static $PROXY_MAIL = ['gmail.com', ];//, 'hotmail.com', 'outlook.com'
+    private $socks5_host;
+    private $socks5_port;
+    private $socks5_username;
+    private $socks5_password;
+
+    private $CacheObj;
+
+    private $MailDecodeObj;
+
+    private $LogObj;
 
     function __construct() {
-        $this->obj = OptionHelper::getGouuse();
+        $this->CacheObj = new Cache();
+        $this->MailDecodeObj = new MailDecode();
+        $this->LogObj = new Log();
     }
     //---------------
     // 基础操作
@@ -77,7 +91,21 @@ class SocketImapLib
             $obj->reconnect();
         }
         return $obj;
+    }
 
+    /**
+     * 设置socket代理
+     * @param string $host
+     * @param int $port
+     * @param string|null $username
+     * @param string|null $password
+     */
+    public function setSocks5(string $host,int $port, string $username = null, string $password = null)
+    {
+        $this->socks5_host = $host;
+        $this->socks5_port = $port;
+        $this->socks5_username = $username;
+        $this->socks5_password = $password;
     }
 
     //连接服务器
@@ -96,9 +124,9 @@ class SocketImapLib
                 return false;
             }
             //echo $this->strHost.', '.$this->intPort;
-            $time_start = DateHelper::microtime_float();
+            $time_start = microtime_float();
             try {
-                if (is_swoole()) {
+                if (runInSwoole()) {
                     if ($this->is_ssl) {
                         //启用ssl
                         $this->resHandler = new \Swoole\Client(SWOOLE_SOCK_TCP | SWOOLE_SSL);
@@ -115,13 +143,13 @@ class SocketImapLib
                     $client_setting = [
                         'package_max_length' => 2000000
                     ];
-                    if (in_array($email_host, self::$PROXY_MAIL) && env("PROXY_HOST")) {
+                    if (in_array($email_host, self::$PROXY_MAIL) && $this->socks5_host) {
                         //需要使用代理
-                        $client_setting['socks5_host'] = env("PROXY_HOST");
-                        $client_setting['socks5_port'] = env("PROXY_PORT");
-                        if (env("PROXY_USERNAME")) {
-                            $client_setting['socks5_username'] = env("PROXY_USERNAME");
-                            $client_setting['socks5_password'] = env("PROXY_PASS");
+                        $client_setting['socks5_host'] = $this->socks5_host;
+                        $client_setting['socks5_port'] = $this->socks5_port;
+                        if ($this->socks5_username) {
+                            $client_setting['socks5_username'] = $this->socks5_username;
+                            $client_setting['socks5_password'] = $this->socks5_password;
                         }
                     }
                     if ($client_setting) {
@@ -149,8 +177,8 @@ class SocketImapLib
                 $this->setMessage($e->getMessage(), $intErrNum);
                 return false;
             }
-            if (env('OPTIMIZATION_DEBUG') == true) {
-                $this->obj->LogLib->optimization_list[] = "execute time:" . (DateHelper::microtime_float() - $time_start) . "connect imap ".$this->strHost;
+            if ($this->OPTIMIZATION_DEBUG == true) {
+                $this->LogObj->optimization_list[] = "execute time:" . (microtime_float() - $time_start) . "connect imap ".$this->strHost;
             }
             if (!$this->resHandler)
             {
@@ -177,7 +205,7 @@ class SocketImapLib
     {
         if ($this->resHandler)
         {
-            $this->_execute_time = DateHelper::microtime_float();
+            $this->_execute_time = microtime_float();
             if (is_swoole() && is_object($this->resHandler)) {
                 $this->resHandler->close();
             } elseif (is_resource($this->resHandler)) {
@@ -192,7 +220,7 @@ class SocketImapLib
     }
 
     //发送指令
-    function sendCommand($strCommand, $exit = false)
+    function sendCommand($strCommand)
     {
         if (!$this->getIsConnect()) {
             return false;
@@ -209,11 +237,11 @@ class SocketImapLib
             echo "command:".$this->strRequest;
         }
         $this->arrRequest[] = $strCommand;
-        if (env('OPTIMIZATION_DEBUG') == true) {
-            $this->_execute_time = DateHelper::microtime_float();
+        if ($this->OPTIMIZATION_DEBUG == true) {
+            $this->_execute_time = microtime_float();
         }
         try {
-            if (is_swoole()) {
+            if (runInSwoole()) {
                 $status = $this->resHandler->send($this->strRequest);
                 if (!$status) {
                     return false;
@@ -225,11 +253,6 @@ class SocketImapLib
             $this->setMessage($e->getMessage(), 1004);
             return false;
         }
-
-        if ($exit) {
-            var_dump($status);
-        }
-
         return true;
     }
 
@@ -239,7 +262,7 @@ class SocketImapLib
         if (!$this->getIsConnect()) {
             return false;
         }
-        if (is_swoole()) {
+        if (runInSwoole()) {
             try {
                 $this->strResponse = $this->resHandler->recv();
             } catch (\Exception $e) {
@@ -267,7 +290,7 @@ class SocketImapLib
             $bufferSize = $this->intBuffSize;
         }
 
-        if (is_swoole()) {
+        if (runInSwoole()) {
             try {
                 if ($this->resHandler->errCode) {
                     $this->setMessage($this->resHandler->errCode, $this->resHandler->errCode);
@@ -408,31 +431,8 @@ class SocketImapLib
                 if (empty($value)) {
                     continue;
                 }
-                //这里会导致bug，不知道之前为啥这样写，先注释了，如果导致其他bug，在根据此处逻辑进行排查
-                /*if (is_array($value)) {
-                    var_dump($value);
-                    foreach ($value as $key1 => $value1) {
-                        if (is_array($value1)) {
-                            $total = count($value1);
-                            for ($i = 0; $i < ceil($total / 2); $i++) {
-                                if(isset($value1[$i + 1]) && !is_array($value1[$i])) {
-                                    $results[$value1[$i]] = $value1[$i + 1];
-                                }
-                            }
-                        } else {
-                            $results[$key1] = $value1;
-                        }
-                    }
-                } else {
-                    $results[$key] = $value;
-                }*/
                 $results[$key] = $value;
             }
-            /*if (isset($results['name']) && isset($results['filename'])) {
-                if (strpos($results['name'], ".") === false) {
-                    $results['name'] = $results['filename'];
-                }
-            }*/
             $part_bodys[$part_num] = $results;
         }
     }
@@ -447,7 +447,7 @@ class SocketImapLib
     function getBody($folder, $intMail)
     {
         $cache_key = 'getBody' . md5($this->strEmail . $folder . $this->pro . $intMail);
-        $data = $this->obj->CacheLib->get($cache_key);
+        $data = $this->CacheObj->get($cache_key);
         if (!empty($data)) {
             return $data;
         }
@@ -470,7 +470,7 @@ class SocketImapLib
         $strcucs = $MailDecodeLib->getStructure($strcucs);
 
         $data = $this->decodeStruct($intMail, $folder, $strcucs);
-        $status = $this->obj->CacheLib->set($cache_key, $data, 3600);
+        $status = $this->CacheObj->set($cache_key, $data, 3600);
         return $data;
     }
 
@@ -561,7 +561,7 @@ class SocketImapLib
         }
         $data = ['content' => $content, 'refuse_content' => $refuse_content, 'attach' => $attachs, 'is_refuse' => $is_refuse];
 
-        $status = $this->obj->CacheLib->set($cache_key, $data, 86400);
+        $status = $this->CacheObj->set($cache_key, $data, 86400);
         return $data;
     }
 
@@ -826,8 +826,8 @@ class SocketImapLib
 
     private function log()
     {
-        if (env('OPTIMIZATION_DEBUG') == true) {
-            $this->obj->LogLib->optimization_list[] = "execute time:" . sprintf("%.5f", DateHelper::microtime_float() - $this->_execute_time) . $this->_command_str;
+        if ($this->OPTIMIZATION_DEBUG == true) {
+            $this->LogObj->optimization_list[] = "execute time:" . sprintf("%.5f", DateHelper::microtime_float() - $this->_execute_time) . $this->_command_str;
         }
     }
 
@@ -988,7 +988,7 @@ class SocketImapLib
         }
         $cache_key = self::folderCacheKey($this->strEmail);
         if ($cache == true) {
-            $results = $this->obj->CacheLib->get($cache_key);
+            $results = $this->CacheObj->get($cache_key);
             if (!empty($results)) {
                 return $results;
             }
@@ -1012,58 +1012,24 @@ class SocketImapLib
         }
 
         foreach ($all_folders as $key => $folder) {
-            //下列是之前的代码，会导致文件夹获取不全的bug，先注释了，如果导致了其他的bug，在根据下列代码修改
-            //$total = $this->selectFolder($folder);
-            //var_dump($total);
-            /*$matchs1 = [];
-            $ex = explode('.', $this->strHost);
-            if (!in_array($ex[count($ex) - 2], ['outlook', 'live', 'hotmail'])) {
-                $this->sendCommand('LIST "' . $folder . '"  *');
-                $responseTwo = $this->getRespMessage();
-                preg_match_all('|"/" "(.*)"|iU', $responseTwo, $matchs1);
+            $is_diy = $this->obj->ThirdMailLib->isDiyFolder($this->strEmail, $folder);
+            $foler_name = mb_convert_encoding($folder, "UTF-8", "UTF7-IMAP");
+            if ($foler_name == '[Gmail]/已加星标' || $foler_name == '[Gmail]'  || $foler_name == '[Gmail]/所有邮件' || $foler_name == '[Gmail]/重要') {
+                //gmail邮箱 不显示星标 所有邮件
+                continue;
             }
-            var_dump($matchs1);
-            if (isset($matchs1[0][1])) {
-                unset($all_folders[$key]);
-            } else*/
-            if(1){
-                $is_diy = $this->obj->ThirdMailLib->isDiyFolder($this->strEmail, $folder);
-                $foler_name = mb_convert_encoding($folder, "UTF-8", "UTF7-IMAP");
-                if ($foler_name == '[Gmail]/已加星标' || $foler_name == '[Gmail]'  || $foler_name == '[Gmail]/所有邮件' || $foler_name == '[Gmail]/重要') {
-                    //gmail邮箱 不显示星标 所有邮件
-                    continue;
-                }
-                $results[$folder] = ['folder' => $folder, 'folder_name' => $foler_name];
-                $trans_folder_name = $this->obj->MailDecodeLib->folderToName($foler_name);
-                if (!in_array($trans_folder_name, $folder_types)) {
-                    $folder_types[] = $trans_folder_name;
-                    $results[$folder]['folder_name'] = $trans_folder_name;
-                    $results[$folder]['folder_type'] = $this->obj->MailDecodeLib->folderType($trans_folder_name);
-                } else {
-                    $results[$folder]['folder_type'] = "";
-                }
-                $results[$folder]['is_diy'] = $is_diy;
-                if ($results[$folder]['folder_type'] == self::FOLDER_TYPE_SENT_SALE) {
-                    //是否创建了 营销邮件文件夹
-                    $scrm_sent_created = true;
-                    $results[$folder]['is_diy'] = 0;
-                }
+            $results[$folder] = ['folder' => $folder, 'folder_name' => $foler_name];
+            $trans_folder_name = $this->obj->MailDecodeLib->folderToName($foler_name);
+            if (!in_array($trans_folder_name, $folder_types)) {
+                $folder_types[] = $trans_folder_name;
+                $results[$folder]['folder_name'] = $trans_folder_name;
+                $results[$folder]['folder_type'] = $this->MailDecodeObj->folderType($trans_folder_name);
+            } else {
+                $results[$folder]['folder_type'] = "";
             }
         }
-        if ($scrm_sent_created == false) {//$this->obj->RequestLib->getSystemType() == 'scrm' &&
-            $foler_name = "已发送的营销邮件";
-            $trans_folder_name = mb_convert_encoding($foler_name, "UTF7-IMAP", "UTF-8");
-            if ($this->createFolder($trans_folder_name)) {
-                //自动创建营销邮件
-                $results[$trans_folder_name] = [
-                    'folder' => $trans_folder_name,
-                    'folder_name' => $foler_name,
-                    'folder_type' => self::FOLDER_TYPE_SENT_SALE,
-                    'is_diy' => 0
-                ];
-            }
-        }
-        $this->obj->CacheLib->set($cache_key, $results, 3600);
+
+        $this->CacheObj->set($cache_key, $results, 3600);
         $this->log();
         return $results;
     }
@@ -1109,7 +1075,7 @@ class SocketImapLib
         }
         $group_key = 'mail_uid' . md5($this->strEmail . $this->Select_Box . $this->pro);
         $redis_key = $group_key . "all" . $after;
-        if ($check_cache && $data = $this->obj->CacheLib->get($redis_key)) {
+        if ($check_cache && $data = $this->CacheObj->get($redis_key)) {
             return $data;
         }
 
@@ -1125,22 +1091,6 @@ class SocketImapLib
             array_pop($data);
         }
         $results = [];
-        /*$total = count($data);
-        if ($total) {
-        	$index = 0;
-        	$unReceiveMail = $this->obj->getUnAbleReceive($this->account_id, $folder);
-			while($total--) {
-				if (in_array($unReceiveMail, $data[$total])) {
-					break;
-				}
-                $results[$data[$total]] = ['uid' => $data[$total]];
-                $index++;
-                if ($index >= 1000) {
-                    //最多同步1000封
-                    break;
-                }
-			}
-		}*/
         foreach ($data as $row) {
             if (!intval($row)) {
                 continue;
@@ -1148,7 +1098,7 @@ class SocketImapLib
             $results[$row] = ['uid' => $row];
         }
         if ($check_cache) {
-            $this->obj->CacheLib->saveWithKey($group_key, $redis_key, $results, $this->cache_time);
+            $this->CacheObj->saveWithKey($group_key, $redis_key, $results, $this->cache_time);
         }
         $this->log();
         return $results;
@@ -1161,7 +1111,7 @@ class SocketImapLib
         }
         $group_key = 'mail_uid' . md5($this->strEmail . $folder . $this->pro);
         $redis_key = $group_key . "getUidByMark" . $mark_type;
-        if ($check_cache && $data = $this->obj->CacheLib->get($redis_key)) {
+        if ($check_cache && $data = $this->CacheObj->get($redis_key)) {
             return $data;
         }
         if ($folder != $this->Select_Box) {
@@ -1189,7 +1139,7 @@ class SocketImapLib
         $this->log();
         //设置过期时间
         if ($check_cache) {
-            $this->obj->CacheLib->saveWithKey($group_key, $redis_key, $data, $this->cache_time);
+            $this->CacheObj->saveWithKey($group_key, $redis_key, $data, $this->cache_time);
         }
         return $data;
     }
@@ -1197,7 +1147,7 @@ class SocketImapLib
     public function getUidIndex($uid)
     {
         $redis_key = 'mail_uid' . md5($this->strEmail . $this->Select_Box . $this->pro);
-        $data = $this->obj->CacheLib->get($redis_key);
+        $data = $this->CacheObj->get($redis_key);
         return array_search($data, $uid);
     }
 
@@ -1208,7 +1158,7 @@ class SocketImapLib
     public function clearCache($folder)
     {
         $redis_key = 'mail_uid' . md5($this->strEmail . $folder . $this->pro);
-        $this->obj->CacheLib->delWithKey($redis_key);
+        $this->CacheObj->delWithKey($redis_key);
     }
 
     /**
@@ -1371,7 +1321,7 @@ class SocketImapLib
         if (!$this->getIsConnect() && $this->bolIsLogin) {
             return false;
         }
-        $this->obj->CacheLib->delete($this->strEmail . $this->pro . 'getFolderList');
+        $this->CacheObj->delete($this->strEmail . $this->pro . 'getFolderList');
         $this->sendCommand("DELETE " . $folder);
         $this->getLineResponse();
         if (!$this->getRestIsSucceed()) {
@@ -1385,7 +1335,7 @@ class SocketImapLib
         if (!$this->getIsConnect() && $this->bolIsLogin) {
             return false;
         }
-        $this->obj->CacheLib->delete($this->strEmail . $this->pro . 'getFolderList');
+        $this->CacheObj->delete($this->strEmail . $this->pro . 'getFolderList');
         $this->sendCommand("CREATE " . $folder);
         $this->getLineResponse();
         $this->log();
@@ -1434,7 +1384,7 @@ class SocketImapLib
         if (!$this->getIsConnect() && $this->bolIsLogin) {
             return false;
         }
-        $this->obj->CacheLib->delete($this->strEmail . $this->pro . 'getFolderList');
+        $this->CacheObj->delete($this->strEmail . $this->pro . 'getFolderList');
         $this->sendCommand("RENAME " . $oldfolder . " " . $new_folder);
         $this->getLineResponse();
         if (!$this->getRestIsSucceed()) {
@@ -1565,19 +1515,6 @@ class SocketImapLib
             }
         }
 
-        /*$content = $this->getRespMessage();
-        $content = substr($content, strpos($content, "\r\n")+2);
-        $content = substr($content, 0, stripos($content, ")\r\n"));
-        if ($body_encoding) {
-            if ($body_encoding == 'quoted-printable') {
-                $content = quoted_printable_decode($content);
-            } elseif ($body_encoding == 'base64') {
-                $content = base64_decode($content);
-            }
-        }
-        if ($body_charset) {
-            $content = $this->obj->MailDecodeLib->convertStringEncoding($content, $body_charset, 'UTF-8');
-        }*/
         if ($save_path) {
             fclose($fp);
         }
@@ -1590,9 +1527,8 @@ class SocketImapLib
     //输出错误信息
     function printError()
     {
-        echo "[Error Msg] : $strMessage     <br>\n";
-        echo "[Error Num] : $intErrorNum <br>\n";
-        exit;
+        echo "[Error Msg] : $this->strMessage     <br>\n";
+        echo "[Error Num] : $this->intErrorNum <br>\n";
     }
 
     //输出主机信息
@@ -1602,7 +1538,6 @@ class SocketImapLib
         echo "[Port]  : $this->intPort <br>\n";
         echo "[Email] : $this->strEmail <br>\n";
         echo "[Passwd] : ******** <br>\n";
-        exit;
     }
 
     //输出连接信息
@@ -1611,7 +1546,6 @@ class SocketImapLib
         echo "[Connect] : $this->resHandler <br>\n";
         echo "[Request] : $this->strRequest <br>\n";
         echo "[Response] : $this->strResponse <br>\n";
-        exit;
     }
 
     public function __destruct()
